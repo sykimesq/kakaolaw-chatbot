@@ -8,12 +8,11 @@ from app.services.kakao_adapter import (
     MockAlimtalkAdapter,
     get_openbuilder_adapter,
 )
-from app.services.llm_adapter import MockLLMAdapter
+from app.services.llm_provider import get_llm_adapter
 
 router = APIRouter(prefix="/chat", tags=["chat"])
 
-# 실제 LLM/알림톡 키 확보 전까지 mock 사용
-_llm = MockLLMAdapter()
+# 실제 알림톡 키 확보 전까지 mock 사용
 _alimtalk = MockAlimtalkAdapter()
 
 
@@ -25,7 +24,9 @@ def chat_webhook(payload: dict, session: Session = Depends(get_session)):
     text = parsed["text"]
     user_key = parsed["user_key"]
 
-    svc = ElicitationService(_llm)
+    # config의 llm_provider에 따라 어댑터 선택 (mock/openrouter)
+    llm = get_llm_adapter()
+    svc = ElicitationService(llm)
 
     # 긴급 감지
     urgent = svc.is_urgent(text)

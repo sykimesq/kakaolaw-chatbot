@@ -6,8 +6,16 @@ class Settings(BaseSettings):
 
     app_name: str = "Kakao Law Chatbot"
     database_url: str = "sqlite:///./kakaolaw.db"
-    # 어댑터 선택 (mock: 실제 API 키 없이 테스트용)
-    llm_adapter: str = "mock"
+
+    # ── LLM 어댑터 설정 ──────────────────────────────
+    # llm_provider: "mock" | "openrouter"
+    llm_provider: str = "mock"
+    # llm_model: provider별 모델 ID (예: nvidia/nemotron-3-super-120b-a12b:free)
+    llm_model: str = "nvidia/nemotron-3-super-120b-a12b:free"
+    openrouter_base_url: str = "https://openrouter.ai/api/v1"
+    openrouter_api_key: str = ""  # .env에서 주입
+
+    # ── 카카오 어댑터 설정 ────────────────────────────
     alimtalk_adapter: str = "mock"
     openbuilder_adapter: str = "mock"
 

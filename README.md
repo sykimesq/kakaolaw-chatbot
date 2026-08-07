@@ -42,13 +42,32 @@ python -m venv .venv
 source .venv/Scripts/activate   # Windows git-bash
 pip install -r requirements.txt
 
-# 2. 서버 실행
+# 2. (선택) LLM 설정 — .env.example을 복사해 .env로 생성
+cp .env.example .env
+# .env에서 OPENROUTER_API_KEY 설정, LLM_PROVIDER=openrouter로 변경
+
+# 3. 서버 실행
 uvicorn app.main:app --reload
 
-# 3. 접속
+# 4. 접속
 #  - 관리자 화면: http://localhost:8000/admin
 #  - API 문서:    http://localhost:8000/docs
 ```
+
+### LLM Provider/Model 변경
+
+`app/config.py` 또는 `.env`에서 변경한다.
+
+| 설정 | 기본값 | 설명 |
+|------|--------|------|
+| `LLM_PROVIDER` | `mock` | `mock` 또는 `openrouter` |
+| `LLM_MODEL` | `nvidia/nemotron-3-super-120b-a12b:free` | OpenRouter 모델 ID |
+| `OPENROUTER_API_KEY` | (빈 값) | OpenRouter 키 (필수) |
+| `OPENROUTER_BASE_URL` | `https://openrouter.ai/api/v1` | API 엔드포인트 |
+
+provider/model은 어댑터 팩토리(`app/services/llm_provider.py`)를 통해
+config 기반으로 자동 선택된다. 다른 provider 추가 시 해당 어댑터 클래스를
+구현하고 팩토리에 등록하면 된다.
 
 ## API 엔드포인트
 
@@ -69,7 +88,8 @@ uvicorn app.main:app --reload
 
 | 어댑터 | 파일 | 실제 연동 시 |
 |--------|------|--------------|
-| LLM (되묻기) | `app/services/llm_adapter.py` | `LLMAdapter` 구현체를 실제 LLM API로 교체 |
+| LLM (되묻기) | `app/services/llm_adapter.py` | `LLMAdapter` 구현체 (`OpenRouterLLMAdapter` 등) |
+| LLM 팩토리 | `app/services/llm_provider.py` | `llm_provider` config로 어댑터 선택 |
 | 오픈빌더 | `app/services/kakao_adapter.py` | `OpenBuilderAdapter` 구현체를 오픈빌더 API로 교체 |
 | 알림톡 | `app/services/kakao_adapter.py` | `AlimtalkAdapter` 구현체를 비즈메시지 API로 교체 |
 
