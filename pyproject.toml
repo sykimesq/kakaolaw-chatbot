@@ -12,3 +12,7 @@ line-length = 100
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "W"]
+
+[tool.ruff.lint.per-file-ignores]
+# 시스템 프롬프트(한국어 법적 가이드)는 줄 길이 제한 제외
+"app/services/llm_adapter.py" = ["E501"]
