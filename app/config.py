@@ -10,8 +10,9 @@ class Settings(BaseSettings):
     # ── LLM 어댑터 설정 ──────────────────────────────
     # llm_provider: "mock" | "openrouter"
     llm_provider: str = "mock"
-    # llm_model: provider별 모델 ID (예: nvidia/nemotron-3-super-120b-a12b:free)
-    llm_model: str = "nvidia/nemotron-3-super-120b-a12b:free"
+    # llm_model: provider별 모델 ID
+    # 오픈빌더 스킬 timeout(5초) 안에 응답해야 하므로 빠른 무료 모델 사용
+    llm_model: str = "nvidia/nemotron-3-nano-30b-a3b:free"
     openrouter_base_url: str = "https://openrouter.ai/api/v1"
     openrouter_api_key: str = ""  # .env에서 주입
 
