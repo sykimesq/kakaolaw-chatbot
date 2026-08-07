@@ -74,6 +74,36 @@ def test_conversation_history_persists():
         assert msgs[0].content == "메시지 0"
 
 
+def test_elicit_turn_limit_completes():
+    """되묻기 턴 한도(4턴) 도달 시 자동 '접수 완료' 응답."""
+    from sqlmodel import Session, select
+
+    from app.database import engine
+    from app.models import ChatMessage
+
+    user_key = "limit-user-001"
+    last_response = ""
+    for i in range(6):  # 6턴 전송
+        r = client.post(
+            "/chat/openbuilder",
+            json={"userRequest": {"utterance": f"상담 {i}", "user": {"id": user_key}}},
+        )
+        assert r.status_code == 200
+        body = r.json()
+        text = body["template"]["outputs"][0]["simpleText"]["text"]
+        last_response = text
+
+    # 4턴 초과(5턴부터) 이후에는 '접수 완료' 메시지
+    assert "접수했습니다" in last_response or "변호사가 검토" in last_response
+
+    # DB에 메시지가 저장됐는지 확인 (user 6 + assistant 6 = 12)
+    with Session(engine) as s:
+        msgs = s.exec(
+            select(ChatMessage).where(ChatMessage.user_key == user_key)
+        ).all()
+        assert len(msgs) == 12
+
+
 def test_create_reservation():
     r = client.post(
         "/chat/reservations",
