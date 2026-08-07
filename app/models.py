@@ -51,3 +51,13 @@ class Reservation(SQLModel, table=True):
     desired_dt: str  # 희망 날짜/시간 (문자열)
     status: ReservationStatus = ReservationStatus.PENDING
     created_at: datetime = Field(default_factory=datetime.utcnow)
+
+
+class ChatMessage(SQLModel, table=True):
+    """사용자별 대화 히스토리 (되묻기 컨텍스트 유지용)."""
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    user_key: str = Field(index=True)  # 카카오 사용자 식별자
+    role: str  # "user" | "assistant"
+    content: str
+    created_at: datetime = Field(default_factory=datetime.utcnow)

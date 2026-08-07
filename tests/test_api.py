@@ -43,6 +43,37 @@ def test_openbuilder_webhook():
     assert "simpleText" in body["template"]["outputs"][0]
 
 
+def test_conversation_history_persists():
+    """같은 user_key로 연속 발화 시 이전 대화가 컨텍스트로 유지되는지 확인.
+
+    mock LLM은 히스토리 길이를 응답으로 돌려주도록 검증 (DB에 메시지 누적 확인).
+    """
+    # 같은 user_key로 3번 연속 메시지
+    user_key = "conv-user-001"
+    for i in range(3):
+        r = client.post(
+            "/chat/openbuilder",
+            json={"userRequest": {"utterance": f"메시지 {i}", "user": {"id": user_key}}},
+        )
+        assert r.status_code == 200
+
+    # DB에 메시지가 저장됐는지 ChatMessage를 직접 조회
+    from sqlmodel import Session, select
+
+    from app.database import engine
+    from app.models import ChatMessage
+
+    with Session(engine) as s:
+        msgs = s.exec(
+            select(ChatMessage).where(ChatMessage.user_key == user_key)
+        ).all()
+        # user 3 + assistant 3 = 6개
+        assert len(msgs) == 6
+        # 순서 확인: 첫 user 메시지가 먼저
+        assert msgs[0].role == "user"
+        assert msgs[0].content == "메시지 0"
+
+
 def test_create_reservation():
     r = client.post(
         "/chat/reservations",

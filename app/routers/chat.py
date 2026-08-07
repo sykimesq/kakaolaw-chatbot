@@ -1,8 +1,14 @@
 from fastapi import APIRouter, Depends
-from sqlmodel import Session
+from sqlmodel import Session, select
 
 from app.database import get_session
-from app.models import CaseField, Inquiry, InquiryStatus, Reservation
+from app.models import (
+    CaseField,
+    ChatMessage,
+    Inquiry,
+    InquiryStatus,
+    Reservation,
+)
 from app.services.elicitation import ElicitationService
 from app.services.kakao_adapter import (
     MockAlimtalkAdapter,
@@ -15,9 +21,31 @@ router = APIRouter(prefix="/chat", tags=["chat"])
 # 실제 알림톡 키 확보 전까지 mock 사용
 _alimtalk = MockAlimtalkAdapter()
 
+# 최근 대화 컨텍스트로 LLM에 보낼 최대 메시지 수 (토큰 제한 대응)
+MAX_HISTORY = 10
+
+
+def _get_history(session: Session, user_key: str) -> list[dict]:
+    """사용자별 최근 대화 메시지를 LLM용 히스토리로 변환."""
+    msgs = session.exec(
+        select(ChatMessage)
+        .where(ChatMessage.user_key == user_key)
+        .order_by(ChatMessage.id.desc())
+        .limit(MAX_HISTORY)
+    ).all()
+    # 오래된 순으로 뒤집기
+    return [
+        {"role": m.role, "content": m.content}
+        for m in reversed(msgs)
+    ]
+
+
+def _save_message(session: Session, user_key: str, role: str, content: str) -> None:
+    session.add(ChatMessage(user_key=user_key, role=role, content=content))
+
 
 def _process_utterance(text: str, user_key: str, session: Session) -> dict:
-    """공용: 되묻기 응답 생성 + 접수 저장. (내부 처리 함수)"""
+    """공용: 되묻기 응답 생성 + 대화 저장. (내부 처리 함수)"""
     # config의 llm_provider에 따라 어댑터 선택 (mock/openrouter)
     llm = get_llm_adapter()
     svc = ElicitationService(llm)
@@ -25,9 +53,17 @@ def _process_utterance(text: str, user_key: str, session: Session) -> dict:
     # 긴급 감지
     urgent = svc.is_urgent(text)
 
-    # 되묻기 질문 생성
-    history = [{"role": "user", "content": text}]
+    # 현재 입력을 히스토리에 추가
+    history = _get_history(session, user_key)
+    history.append({"role": "user", "content": text})
+
+    # 되묻기 질문 생성 (이전 대화 포함)
     question = svc.next_question(history)
+
+    # 대화 저장: 사용자 입력 + 챗봇 응답
+    _save_message(session, user_key, "user", text)
+    _save_message(session, user_key, "assistant", question)
+    session.commit()
 
     # 간단한 상태 저장: 접수된 Inquiry 생성
     inquiry = Inquiry(
