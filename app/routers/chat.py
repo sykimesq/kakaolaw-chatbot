@@ -1,3 +1,5 @@
+import threading
+
 from fastapi import APIRouter, Depends
 from sqlmodel import Session, select
 
@@ -101,19 +103,40 @@ def _process_utterance(text: str, user_key: str, session: Session) -> dict:
     session.add(inquiry)
     session.commit()
 
-    # 접수 완료(또는 긴급) 시 변호사에게 대화 요약 전달
+    # 접수 완료(또는 긴급) 시 변호사에게 대화 요약 전달.
+    # ⚠️ 고객 응답은 즉시 반환해야 오픈빌더 timeout(5초)을 피할 수 있으므로,
+    #    변호사 요약(LLM 호출)은 백그라운드 스레드로 분리한다.
     if inquiry_status in (InquiryStatus.COMPLETED, InquiryStatus.URGENT):
-        try:
-            summary = svc.summarize(history)
-        except Exception:
-            # 요약 실패 시 원문 그대로 전달 (LLM 호출 실패 방어)
-            summary = {"summary": " ".join(m["content"] for m in history if m["role"] == "user")}
-        _alimtalk.send_inquiry_to_lawyer(
-            {"summary": summary, "urgent": urgent},
-            inquiry.phone,
+        history_snapshot = list(history)
+        phone = inquiry.phone
+        _thread = threading.Thread(
+            target=_summarize_and_notify_lawyer,
+            args=(history_snapshot, phone, urgent),
+            daemon=True,
         )
+        _thread.start()
 
     return {"response": response, "urgent": urgent, "inquiry_id": inquiry.id}
+
+
+def _summarize_and_notify_lawyer(history: list[dict], phone: str, urgent: bool) -> None:
+    """변호사에게 전달할 대화 요약 생성 + 알림톡 발송. (백그라운드 실행)
+
+    LLM 요약이 느려도 고객 응답과 무관하게 동작하도록 별도 스레드에서 수행한다.
+    """
+    llm = get_llm_adapter()
+    svc = ElicitationService(llm)
+    try:
+        summary = svc.summarize(history)
+    except Exception:
+        # 요약 실패 시 원문 그대로 전달 (LLM 호출 실패 방어)
+        summary = {
+            "summary": " ".join(m["content"] for m in history if m["role"] == "user")
+        }
+    _alimtalk.send_inquiry_to_lawyer(
+        {"summary": summary, "urgent": urgent},
+        phone,
+    )
 
 
 @router.post("/webhook")
