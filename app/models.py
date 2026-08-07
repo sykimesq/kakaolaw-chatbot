@@ -1,5 +1,6 @@
 from datetime import datetime
 from enum import Enum
+from typing import Optional
 
 from sqlmodel import Field, SQLModel
 
@@ -29,10 +30,10 @@ class ReservationStatus(str, Enum):
 class Inquiry(SQLModel, table=True):
     """법률 상담 질의 (되묻기 수집 후 요약 전달)."""
 
-    id: int | None = Field(default=None, primary_key=True)
+    id: Optional[int] = Field(default=None, primary_key=True)
     phone: str  # 문의자 연락처
     name: str = ""  # 문의자 이름
-    field: CaseField | None = None  # 상담 분야
+    field: Optional[CaseField] = None  # 상담 분야
     position: str = ""  # 문의자 입장 (당사자/가족 등)
     summary: str = ""  # 질의 요약
     status: InquiryStatus = InquiryStatus.COLLECTING
@@ -43,7 +44,7 @@ class Inquiry(SQLModel, table=True):
 class Reservation(SQLModel, table=True):
     """상담 예약 신청."""
 
-    id: int | None = Field(default=None, primary_key=True)
+    id: Optional[int] = Field(default=None, primary_key=True)
     name: str
     phone: str
     field: CaseField
