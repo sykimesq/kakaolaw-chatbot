@@ -46,7 +46,8 @@ ELICITATION_SYSTEM_PROMPT = """\
 긴급 신호(구속/긴급/내일 재판/위험) 감지 시 접수를 즉시 완료하라.
 
 다음은 문의자와의 대화 기록이다. 마지막 문의자 발언을 읽고,
-다음으로 던질 '되묻기 질문'을 단 1개만 출력하라. 질문 외 다른 텍스트는 출력하지 마라.
+다음으로 던질 '되묻기 질문'을 단 1개만, 반드시 한 문장(30자 이내)으로
+짧게 출력하라. 질문 외 다른 텍스트, 목록, 번호는 절대 출력하지 마라.
 """
 
 # 요약 생성 시스템 프롬프트
@@ -74,14 +75,16 @@ class OpenRouterLLMAdapter(LLMAdapter):
         api_key: str | None = None,
         base_url: str | None = None,
         model: str | None = None,
-        timeout: float = 60.0,
+        timeout: float = 15.0,
     ):
         self.api_key = api_key or settings.openrouter_api_key
         self.base_url = base_url or settings.openrouter_base_url
         self.model = model or settings.llm_model
         self.timeout = timeout
 
-    def _chat(self, messages: list[dict]) -> str:
+    def _chat(
+        self, messages: list[dict], max_tokens: int | None = None
+    ) -> str:
         """OpenRouter 채팅 완성 호출."""
         url = f"{self.base_url.rstrip('/')}/chat/completions"
         headers = {
@@ -90,7 +93,9 @@ class OpenRouterLLMAdapter(LLMAdapter):
             "HTTP-Referer": "http://localhost:8000",
             "X-Title": "KakaoLawChatbot",
         }
-        payload = {"model": self.model, "messages": messages}
+        payload: dict = {"model": self.model, "messages": messages}
+        if max_tokens is not None:
+            payload["max_tokens"] = max_tokens
         with httpx.Client(timeout=self.timeout) as client:
             resp = client.post(url, headers=headers, json=payload)
             resp.raise_for_status()
@@ -113,7 +118,8 @@ class OpenRouterLLMAdapter(LLMAdapter):
     def next_question(self, history: list[dict]) -> str:
         messages = [{"role": "system", "content": ELICITATION_SYSTEM_PROMPT}]
         messages.extend(history)
-        return self._chat(messages)
+        # max_tokens 제한으로 생성 시간 단축 (오픈빌더 스킬 timeout 5초 대응)
+        return self._chat(messages, max_tokens=80)
 
     def summarize(self, history: list[dict]) -> dict:
         messages = [{"role": "system", "content": SUMMARY_SYSTEM_PROMPT}]
