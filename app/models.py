@@ -10,7 +10,6 @@ class CaseField(str, Enum):
     REAL_ESTATE = "부동산"  # 매매/임대차/명의신탁
     CREDIT_DEBT = "채권채무"  # 대여금/회수/회생
     CRIMINAL = "형사"  # 고소/피의자·피해자 변호
-    LABOR = "노무"  # 근로계약/해고/임금
     TRAFFIC = "교통사고"  # 손해배상/형사처벌 대응
 
 

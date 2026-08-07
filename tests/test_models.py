@@ -2,7 +2,7 @@ from app.models import CaseField, Inquiry, Reservation
 
 
 def test_case_fields():
-    assert len(CaseField) == 6
+    assert len(CaseField) == 5
 
 
 def test_inquiry_model():

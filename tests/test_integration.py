@@ -20,7 +20,7 @@ def test_full_flow():
         json={
             "name": "테스트",
             "phone": "01099998888",
-            "field": "노무",
+            "field": "형사",
             "desired_dt": "8/15 11:00",
         },
     )
