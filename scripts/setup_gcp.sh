@@ -23,7 +23,7 @@ $SUDO apt install -y git python3-venv python3-dev build-essential
 
 echo "▶ 코드 clone (없으면)"
 if [ ! -d ~/kakaolaw ]; then
-    git clone https://github.com/YOUR_GITHUB_USER/kakaolaw-chatbot.git ~/kakaolaw
+    git clone https://github.com/sykimesq/kakaolaw-chatbot.git ~/kakaolaw
 fi
 cd ~/kakaolaw
 
