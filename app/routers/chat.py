@@ -16,14 +16,8 @@ router = APIRouter(prefix="/chat", tags=["chat"])
 _alimtalk = MockAlimtalkAdapter()
 
 
-@router.post("/webhook")
-def chat_webhook(payload: dict, session: Session = Depends(get_session)):
-    """오픈빌더 웹훅 수신 → 되묻기 응답/접수 처리."""
-    ob = get_openbuilder_adapter("mock")
-    parsed = ob.parse_request(payload)
-    text = parsed["text"]
-    user_key = parsed["user_key"]
-
+def _process_utterance(text: str, user_key: str, session: Session) -> dict:
+    """공용: 되묻기 응답 생성 + 접수 저장. (내부 처리 함수)"""
     # config의 llm_provider에 따라 어댑터 선택 (mock/openrouter)
     llm = get_llm_adapter()
     svc = ElicitationService(llm)
@@ -50,6 +44,27 @@ def chat_webhook(payload: dict, session: Session = Depends(get_session)):
         _alimtalk.send_inquiry_to_lawyer({"summary": text, "urgent": True}, inquiry.phone)
 
     return {"response": question, "urgent": urgent, "inquiry_id": inquiry.id}
+
+
+@router.post("/webhook")
+def chat_webhook(payload: dict, session: Session = Depends(get_session)):
+    """(개발/테스트용) 간단한 웹훅: {"utterance": "...", "user_key": "..."}."""
+    ob = get_openbuilder_adapter("mock")
+    parsed = ob.parse_request(payload)
+    return _process_utterance(parsed["text"], parsed["user_key"], session)
+
+
+@router.post("/openbuilder")
+def openbuilder_webhook(payload: dict, session: Session = Depends(get_session)):
+    """카카오 i 오픈빌더 실제 웹훅 수신 → 되묻기 응답/접수 처리.
+
+    요청: {"userRequest": {"utterance": "...", "user": {"id": "..."}}}
+    응답: {"version": "2.0", "template": {"outputs": [{"simpleText": {"text": "..."}}]}}
+    """
+    ob = get_openbuilder_adapter("real")
+    parsed = ob.parse_request(payload)
+    result = _process_utterance(parsed["text"], parsed["user_key"], session)
+    return ob.send_response(result)
 
 
 @router.post("/reservations")

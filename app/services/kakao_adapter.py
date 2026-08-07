@@ -41,6 +41,43 @@ class MockOpenBuilderAdapter(OpenBuilderAdapter):
         return {"sent": True, "response": response}
 
 
+class RealOpenBuilderAdapter(OpenBuilderAdapter):
+    """실제 카카오 i 오픈빌더 웹훅 요청/응답 파싱.
+
+    오픈빌더 스킬(웹훅)이 보내는 실제 payload 형식:
+    {
+      "userRequest": {
+        "utterance": "...",
+        "user": {"id": "..."},
+        "params": {...}
+      },
+      "bot": {...}
+    }
+
+    우리가 돌려줘야 하는 응답 형식:
+    {
+      "version": "2.0",
+      "template": {"outputs": [{"simpleText": {"text": "..."}}]}
+    }
+    """
+
+    def parse_request(self, payload: dict) -> dict:
+        user_request = payload.get("userRequest", {})
+        user = user_request.get("user", {}) or {}
+        return {
+            "user_key": user.get("id", ""),
+            "text": user_request.get("utterance", ""),
+        }
+
+    def send_response(self, response: dict) -> dict:
+        # 오픈빌더 응답 형식으로 감싸기
+        text = response.get("response", "")
+        return {
+            "version": "2.0",
+            "template": {"outputs": [{"simpleText": {"text": text}}]},
+        }
+
+
 class MockAlimtalkAdapter(AlimtalkAdapter):
     def send_inquiry_to_lawyer(self, summary: dict, phone: str) -> dict:
         return {
@@ -62,6 +99,8 @@ class MockAlimtalkAdapter(AlimtalkAdapter):
 def get_openbuilder_adapter(kind: str = "mock") -> OpenBuilderAdapter:
     if kind == "mock":
         return MockOpenBuilderAdapter()
+    if kind == "real":
+        return RealOpenBuilderAdapter()
     raise ValueError(f"Unknown adapter: {kind}")
 
 

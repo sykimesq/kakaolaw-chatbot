@@ -23,6 +23,26 @@ def test_webhook_urgent():
     assert r.json()["urgent"] is True
 
 
+def test_openbuilder_webhook():
+    """실제 오픈빌더 형식 요청 → 오픈빌더 형식 응답."""
+    r = client.post(
+        "/chat/openbuilder",
+        json={
+            "userRequest": {
+                "utterance": "이혼 문의",
+                "user": {"id": "kakao-user-123"},
+            }
+        },
+    )
+    assert r.status_code == 200
+    body = r.json()
+    # 오픈빌더 응답 형식 검증
+    assert body["version"] == "2.0"
+    assert body["template"]["outputs"][0]["simpleText"]["text"]
+    # 사용자 키 추출 확인 (접수 DB에 저장됐는지는 별개 — 여기선 응답 형식만)
+    assert "simpleText" in body["template"]["outputs"][0]
+
+
 def test_create_reservation():
     r = client.post(
         "/chat/reservations",
