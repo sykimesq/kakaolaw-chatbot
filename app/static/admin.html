@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>법률사무소 관리자</title>
+  <style>
+    body { font-family: sans-serif; max-width: 700px; margin: 0 auto; padding: 16px; }
+    h2 { margin-top: 24px; border-bottom: 2px solid #eee; padding-bottom: 8px; }
+    .card { border: 1px solid #ddd; border-radius: 8px; padding: 12px; margin-bottom: 12px; }
+    .badge-new { color: #d00; font-weight: bold; }
+    .meta { color: #666; margin-top: 4px; }
+    button { margin: 4px; padding: 6px 12px; border: none; border-radius: 6px; cursor: pointer; }
+    .ok { background: #4caf50; color: white; }
+    .no { background: #f44336; color: white; }
+    .done { background: #90a4ae; color: white; }
+    .empty { color: #999; }
+  </style>
+</head>
+<body>
+  <h1>법률사무소 관리자</h1>
+
+  <h2>📋 예약 신청 목록</h2>
+  <div id="reservations"><div class="empty">로딩 중...</div></div>
+
+  <h2>📋 상담 질의 접수</h2>
+  <div id="inquiries"><div class="empty">로딩 중...</div></div>
+
+  <script>
+    async function load() {
+      const [res, inq] = await Promise.all([
+        fetch('/admin/reservations').then(r => r.json()),
+        fetch('/admin/inquiries').then(r => r.json()),
+      ]);
+      const rEl = document.getElementById('reservations');
+      rEl.innerHTML = res.map(r => `
+        <div class="card">
+          <span class="badge-new">[${r.status}]</span> ${r.name} ${r.phone}<br>
+          <span class="meta">${r.field} · ${r.desired_dt}</span><br>
+          <button class="ok" onclick="act(${r.id},'confirm')">확정</button>
+          <button class="no" onclick="act(${r.id},'reject')">불가</button>
+        </div>`).join('') || '<div class="empty">예약 없음</div>';
+
+      const iEl = document.getElementById('inquiries');
+      iEl.innerHTML = inq.map(i => `
+        <div class="card">
+          <span class="badge-new">[${i.status}]</span> ${i.name || '이름없음'} ${i.phone}<br>
+          <span class="meta">분야: ${i.field || '미정'} · 입장: ${i.position || '미정'}</span><br>
+          ${i.summary || ''}<br>
+          <button class="done" onclick="resolve(${i.id})">완료 처리</button>
+        </div>`).join('') || '<div class="empty">질의 없음</div>';
+    }
+
+    async function act(id, action) {
+      await fetch(`/admin/reservations/${id}/${action}`, { method: 'POST' });
+      load();
+    }
+    async function resolve(id) {
+      await fetch(`/admin/inquiries/${id}/resolve`, { method: 'POST' });
+      load();
+    }
+    load();
+    setInterval(load, 10000); // 10초마다 자동 새로고침
+  </script>
+</body>
+</html>
