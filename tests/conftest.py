@@ -16,3 +16,14 @@ def _isolated_db(tmp_path, monkeypatch):
     database.engine = database.create_engine(settings.database_url, echo=False)
     database.init_db()
     yield
+
+
+@pytest.fixture(autouse=True)
+def _force_mock_llm(monkeypatch):
+    """테스트는 실제 네트워크/LLM API에 의존하면 안 되므로 LLM을 mock으로 강제.
+
+    사용자 .env에 openrouter 키가 설정돼 있어도 테스트는 항상 mock을 사용해
+    격리된 상태를 유지한다. (웹훅 테스트가 실제 API를 호출해 401이 나는 것 방지)
+    """
+    monkeypatch.setattr(settings, "llm_provider", "mock")
+    yield
