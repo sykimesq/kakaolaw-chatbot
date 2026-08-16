@@ -1,0 +1,52 @@
+# =============================================================================
+# 카카오 법률 챗봇 — 사무실 서버 배포 (kakaolaw.lawcalhost.com)
+# Production Deployment Standard v1 (self-hosted-app-server 스킬 준수)
+#   - web bound ONLY to 127.0.0.1:<WEB_PORT>
+#   - SQLite named volume (kakaolaw-data) for persistence
+#   - explicit image tag (never 'latest')
+#   - healthcheck, restart: unless-stopped, log rotation, memory limit
+# =============================================================================
+
+services:
+  web:
+    image: ${WEB_IMAGE}            # e.g. kakaolaw-web:2026.08.16 (explicit tag)
+    build:
+      context: .
+    container_name: ${APP_NAME}-web
+    restart: unless-stopped
+    environment:
+      - LLM_PROVIDER=${LLM_PROVIDER}
+      - LLM_MODEL=${LLM_MODEL}
+      - OPENROUTER_API_KEY=${OPENROUTER_API_KEY}
+      - OPENROUTER_BASE_URL=${OPENROUTER_BASE_URL}
+      - DATABASE_URL=sqlite:////app/data/kakaolaw.db
+    volumes:
+      # SQLite DB 영속화 — 컨테이너 재생성에도 데이터 유지
+      - kakaolaw-data:/app/data
+    ports:
+      # LOCALHOST-ONLY binding. Cloudflare Tunnel reaches this port on 127.0.0.1.
+      # target = container-internal port uvicorn listens on (8000).
+      # published = host port exposed to localhost only (WEB_PORT, e.g. 8600).
+      - target: 8000
+        published: ${WEB_PORT}
+        host_ip: 127.0.0.1
+        protocol: tcp
+    healthcheck:
+      # python:3.12-slim has no curl/wget — use python urllib.
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/health',timeout=3).status==200 else 1)"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+    deploy:
+      resources:
+        limits:
+          memory: ${WEB_MEM_LIMIT}
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+volumes:
+  kakaolaw-data:

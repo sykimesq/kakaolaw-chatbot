@@ -8,7 +8,7 @@ from app.services.llm_adapter import MockLLMAdapter
 
 
 def test_hard_rules_present():
-    assert "되묻기 에이전트" in HARD_RULES
+    assert "상담 접수 상담사" in HARD_RULES
     assert "답변을 주지 마라" in HARD_RULES
 
 
