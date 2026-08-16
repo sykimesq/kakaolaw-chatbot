@@ -19,6 +19,15 @@ services:
       - LLM_MODEL=${LLM_MODEL}
       - OPENROUTER_API_KEY=${OPENROUTER_API_KEY}
       - OPENROUTER_BASE_URL=${OPENROUTER_BASE_URL}
+      # ── 추론(콜백) 모델 — 오픈빌더 useCallback 2단계 응답용 ──
+      # ⚠️ environment는 명시 나열 방식이므로, .env에 값을 넣어도 여기에
+      #    추가하지 않으면 컨테이너에 전달되지 않는다 (401 원인).
+      - USE_CALLBACK=${USE_CALLBACK}
+      - REASONING_MODELS=${REASONING_MODELS}
+      - REASONING_TIMEOUT=${REASONING_TIMEOUT}
+      - NOUS_PORTAL_API_KEY=${NOUS_PORTAL_API_KEY}
+      - NOUS_BASE_URL=${NOUS_BASE_URL}
+      - CALLBACK_ADAPTER=${CALLBACK_ADAPTER}
       - DATABASE_URL=sqlite:////app/data/kakaolaw.db
     volumes:
       # SQLite DB 영속화 — 컨테이너 재생성에도 데이터 유지
