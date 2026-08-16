@@ -134,6 +134,36 @@ def test_turn_limit_completes_after_max():
             assert "접수했습니다" in text
 
 
+def test_turn_reset_after_completion():
+    """접수 완료 후 새 대화 시작 시 턴 카운트가 리셋된다.
+
+    과거에 12턴 이상 대화해 COMPLETE_MESSAGE로 종료된 user_key라도,
+    그 이후 새 메시지는 1턴부터 시작해야 한다. (테스트 누적분으로 인한
+    첫 메시지 즉시 종료 버그 방지 — 세션 리셋 로직 검증)
+    """
+    user_key = "reset-user-001"
+    # 1) 13턴 보내서 강제 접수 완료 유도
+    for i in range(13):
+        r = client.post(
+            "/chat/openbuilder",
+            json={"userRequest": {"utterance": f"상담 {i}", "user": {"id": user_key}}},
+        )
+        assert r.status_code == 200
+    # 마지막 응답이 접수 완료인지 확인
+    text = r.json()["template"]["outputs"][0]["simpleText"]["text"]
+    assert "접수했습니다" in text
+
+    # 2) 접수 완료 이후 새 메시지 — 턴 카운트 리셋되어 즉시 종료되지 않아야 함
+    r2 = client.post(
+        "/chat/openbuilder",
+        json={"userRequest": {"utterance": "새로운 상담입니다", "user": {"id": user_key}}},
+    )
+    assert r2.status_code == 200
+    text2 = r2.json()["template"]["outputs"][0]["simpleText"]["text"]
+    # 새 세션 1턴째이므로 질문 응답 (접수 완료로 끊기지 않음)
+    assert "접수했습니다" not in text2
+
+
 def test_create_reservation():
     r = client.post(
         "/chat/reservations",

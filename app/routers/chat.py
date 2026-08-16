@@ -61,8 +61,20 @@ def _save_message(session: Session, user_key: str, role: str, content: str) -> N
 
 
 def _count_user_turns(history: list[dict]) -> int:
-    """히스토리에서 사용자 발화(턴) 수를 센다."""
-    return sum(1 for m in history if m["role"] == "user")
+    """가장 최근 '접수 완료' 응답 이후의 사용자 발화 수를 센다.
+
+    한 번 접수 완료(또는 긴급 접수)로 대화가 종료된 적 있으면,
+    그다음 대화는 '새 상담 세션'으로 취급해 턴 카운트를 리셋한다.
+    (과거 테스트/재방문 누적으로 첫 메시지부터 한도에 걸리는 문제 방지)
+    """
+    count = 0
+    for m in reversed(history):
+        # 가장 최근 완료 지점을 만나면 그 이전 발화는 세지 않음
+        if m["role"] == "assistant" and "접수했습니다" in m["content"]:
+            break
+        if m["role"] == "user":
+            count += 1
+    return count
 
 
 def _process_utterance(text: str, user_key: str, session: Session) -> dict:
