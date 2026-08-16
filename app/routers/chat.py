@@ -24,11 +24,15 @@ router = APIRouter(prefix="/chat", tags=["chat"])
 _alimtalk = MockAlimtalkAdapter()
 
 # 최근 대화 컨텍스트로 LLM에 보낼 최대 메시지 수 (토큰 제한 대응)
-MAX_HISTORY = 10
+# ⚠️ 턴 한도(12)를 넘는 순간(13턴째)에도 user 메시지가 13개 남아 있어야
+#    user_turns > MAX_ELICIT_TURNS 가 발동한다. 그러려면
+#    MAX_HISTORY ≥ 2 × (MAX_ELICIT_TURNS + 1) = 26 필요 → 30으로.
+MAX_HISTORY = 30
 
-# 되묻기 최대 턴 수 — 이 턴이 지나면 자동으로 "접수 완료"로 전환
-# (대화가 길어지면 LLM 생성 시간이 늘어 오픈빌더 스킬 timeout(5초) 위험이 커짐)
-MAX_ELICIT_TURNS = 4
+# 되묻기 최대 턴 수 — 이 턴을 넘으면 LLM 호출 없이 즉시 "접수 완료"로 전환.
+# (대화가 길어지면 히스토리가 커져 LLM 생성 시간이 늘어 오픈빌더 스킬 timeout(5초) 위험이 커짐)
+# 사용자가 마무리 의사를 밝히면(LLM이 "접수했습니다" 반환) 그보다 먼저 종료된다.
+MAX_ELICIT_TURNS = 12
 
 # 접수 완료 시 사용자에게 보낼 고정 응답 (LLM 호출 없음 → timeout 안전)
 COMPLETE_MESSAGE = (
@@ -85,8 +89,13 @@ def _process_utterance(text: str, user_key: str, session: Session) -> dict:
         inquiry_status = InquiryStatus.COMPLETED
     else:
         # 되묻기 질문 생성 (이전 대화 포함)
+        # LLM이 사용자의 마무리 의사를 감지하면 "접수했습니다" 응답을 반환한다.
         response = svc.next_question(history)
-        inquiry_status = InquiryStatus.COLLECTING
+        # LLM이 마무리 신호를 감지해 "접수했습니다"를 반환하면 접수 완료로 처리
+        if "접수했습니다" in response:
+            inquiry_status = InquiryStatus.COMPLETED
+        else:
+            inquiry_status = InquiryStatus.COLLECTING
 
     # 대화 저장: 사용자 입력 + 챗봇 응답
     _save_message(session, user_key, "user", text)
