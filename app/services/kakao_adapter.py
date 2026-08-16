@@ -78,6 +78,58 @@ class RealOpenBuilderAdapter(OpenBuilderAdapter):
         }
 
 
+class CallbackAdapter(ABC):
+    """오픈빌더 콜백(useCallback) 응답 전송 인터페이스."""
+
+    @abstractmethod
+    def send(self, callback_url: str, text: str) -> dict:
+        """callbackUrl로 실제 답변을 POST."""
+        ...
+
+
+class MockCallbackAdapter(CallbackAdapter):
+    """테스트용 — 전송하지 않고 기록만."""
+
+    def __init__(self) -> None:
+        self.sent: list[dict] = []
+
+    def send(self, callback_url: str, text: str) -> dict:
+        record = {"sent": True, "url": callback_url, "text": text}
+        self.sent.append(record)
+        return record
+
+
+class RealCallbackAdapter(CallbackAdapter):
+    """오픈빌더 callbackUrl로 실제 답변 POST.
+
+    payload는 일반 스킬 응답과 같은 형식:
+    {"version": "2.0", "template": {"outputs": [{"simpleText": {"text": "..."}}]}}
+    """
+
+    def __init__(self, timeout: float = 10.0) -> None:
+        self.timeout = timeout
+
+    def send(self, callback_url: str, text: str) -> dict:
+        import httpx
+
+        payload = {
+            "version": "2.0",
+            "template": {"outputs": [{"simpleText": {"text": text}}]},
+        }
+        with httpx.Client(timeout=self.timeout) as client:
+            resp = client.post(callback_url, json=payload)
+            resp.raise_for_status()
+        return {"sent": True, "url": callback_url, "status": resp.status_code}
+
+
+def get_callback_adapter(kind: str = "mock") -> CallbackAdapter:
+    if kind == "mock":
+        return MockCallbackAdapter()
+    if kind == "real":
+        return RealCallbackAdapter()
+    raise ValueError(f"Unknown callback adapter: {kind}")
+
+
 class MockAlimtalkAdapter(AlimtalkAdapter):
     def send_inquiry_to_lawyer(self, summary: dict, phone: str) -> dict:
         return {

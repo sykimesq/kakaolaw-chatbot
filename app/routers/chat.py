@@ -1,8 +1,10 @@
 import threading
+import time
 
 from fastapi import APIRouter, Depends
 from sqlmodel import Session, select
 
+from app.config import settings
 from app.database import get_session
 from app.models import (
     CaseField,
@@ -14,9 +16,11 @@ from app.models import (
 from app.services.elicitation import ElicitationService
 from app.services.kakao_adapter import (
     MockAlimtalkAdapter,
+    get_callback_adapter,
     get_openbuilder_adapter,
 )
 from app.services.llm_provider import get_llm_adapter
+from app.services.reasoning import reason_next_question
 
 router = APIRouter(prefix="/chat", tags=["chat"])
 
@@ -35,10 +39,67 @@ MAX_HISTORY = 30
 MAX_ELICIT_TURNS = 12
 
 # 접수 완료 시 사용자에게 보낼 고정 응답 (LLM 호출 없음 → timeout 안전)
+# LLM이 조기에 "접수했습니다"를 반환하거나 턴 한도 도달 시 사용됨.
 COMPLETE_MESSAGE = (
-    "상담 내용을 충분히 접수했습니다. "
-    "변호사가 검토 후 연락드리겠습니다. 감사합니다."
+    "지금까지 말씀해 주신 내용으로 상담을 접수했습니다. "
+    "변호사님께 전달드리고 검토 후 연락드릴게요. 감사합니다."
 )
+
+# ── 콜백 모드 관련 ────────────────────────────────────────────
+# 5초 안에 반환하는 대기 메시지 (LLM 호출 없음 → timeout 안전)
+WAITING_MESSAGE = "말씀해 주신 내용을 확인하고 있어요. 잠시만 기다려 주세요."
+
+# 처리 중 재발화 시 응답 (선착순 처리, 새 발화는 무시)
+BUSY_MESSAGE = "앞서 보내주신 내용을 아직 확인 중이에요. 답변이 곧 도착합니다."
+
+# user_key별 처리 중 플래그 (프로세스 메모리, 단일 워커 컨테이너 전제)
+_inflight: dict[str, float] = {}
+_inflight_lock = threading.Lock()
+
+# 플래그 TTL(초) — 예외로 해제되지 않아도 이 시간 뒤 자동 만료 (영구 무시 방지)
+INFLIGHT_TTL = 60.0
+
+
+def _acquire_inflight(user_key: str) -> bool:
+    """처리 중 플래그 획득. 이미 처리 중이면 False."""
+    now = time.monotonic()
+    with _inflight_lock:
+        started = _inflight.get(user_key)
+        if started is not None and now - started < INFLIGHT_TTL:
+            return False
+        _inflight[user_key] = now
+        return True
+
+
+def _release_inflight(user_key: str) -> None:
+    with _inflight_lock:
+        _inflight.pop(user_key, None)
+
+
+def _callback_worker(text: str, user_key: str, callback_url: str) -> None:
+    """백그라운드: 추론 모델로 되묻기 질문 생성 → callbackUrl로 전송.
+
+    ⚠️ 요청 스코프 세션은 이미 닫혔으므로 자체 세션을 연다.
+    ⚠️ 어떤 예외에도 플래그를 해제해야 사용자가 영구 무시되지 않는다.
+    """
+    try:
+        # ⚠️ conftest가 database.engine을 교체하므로 모듈 속성으로 늦게 참조한다.
+        from app import database
+
+        with Session(database.engine) as session:
+            result = _process_utterance(
+                text, user_key, session, question_fn=reason_next_question
+            )
+        answer = result["response"]
+    except Exception:
+        answer = "죄송해요, 처리 중 문제가 발생했어요. 다시 말씀해 주시겠어요?"
+
+    try:
+        get_callback_adapter(settings.callback_adapter).send(callback_url, answer)
+    except Exception:
+        pass
+    finally:
+        _release_inflight(user_key)
 
 
 def _get_history(session: Session, user_key: str) -> list[dict]:
@@ -77,8 +138,18 @@ def _count_user_turns(history: list[dict]) -> int:
     return count
 
 
-def _process_utterance(text: str, user_key: str, session: Session) -> dict:
-    """공용: 되묻기 응답 생성 + 대화 저장. (내부 처리 함수)"""
+def _process_utterance(
+    text: str,
+    user_key: str,
+    session: Session,
+    question_fn=None,
+) -> dict:
+    """공용: 되묻기 응답 생성 + 대화 저장. (내부 처리 함수)
+
+    question_fn: 히스토리를 받아 되묻기 질문을 만드는 함수.
+        None이면 기존 빠른 모델(`settings.llm_provider`)을 사용한다.
+        콜백 경로에서는 추론 모델 체인(`reason_next_question`)을 넘긴다.
+    """
     # config의 llm_provider에 따라 어댑터 선택 (mock/openrouter)
     llm = get_llm_adapter()
     svc = ElicitationService(llm)
@@ -102,7 +173,7 @@ def _process_utterance(text: str, user_key: str, session: Session) -> dict:
     else:
         # 되묻기 질문 생성 (이전 대화 포함)
         # LLM이 사용자의 마무리 의사를 감지하면 "접수했습니다" 응답을 반환한다.
-        response = svc.next_question(history)
+        response = question_fn(history) if question_fn else svc.next_question(history)
         # LLM이 마무리 신호를 감지해 "접수했습니다"를 반환하면 접수 완료로 처리
         if "접수했습니다" in response:
             inquiry_status = InquiryStatus.COMPLETED
@@ -170,15 +241,42 @@ def chat_webhook(payload: dict, session: Session = Depends(get_session)):
 
 @router.post("/openbuilder")
 def openbuilder_webhook(payload: dict, session: Session = Depends(get_session)):
-    """카카오 i 오픈빌더 실제 웹훅 수신 → 되묻기 응답/접수 처리.
+    """카카오 i 오픈빌더 실제 웹훅 수신.
 
-    요청: {"userRequest": {"utterance": "...", "user": {"id": "..."}}}
-    응답: {"version": "2.0", "template": {"outputs": [{"simpleText": {"text": "..."}}]}}
+    콜백 모드(`settings.use_callback`, 기본 ON):
+      1. 5초 안에 LLM 호출 없이 대기 메시지 + `useCallback: true` 반환
+      2. 백그라운드에서 추론 모델 체인으로 되묻기 질문 생성
+      3. callbackUrl로 실제 답변 POST
+
+    처리 중 같은 사용자가 다시 발화하면 무시(선착순, C안).
+    콜백 URL이 없거나 콜백 모드가 꺼져 있으면 기존 동기 응답으로 처리.
     """
     ob = get_openbuilder_adapter("real")
     parsed = ob.parse_request(payload)
-    result = _process_utterance(parsed["text"], parsed["user_key"], session)
-    return ob.send_response(result)
+    callback_url = payload.get("userRequest", {}).get("callbackUrl", "")
+
+    # 콜백 불가 상황(설정 OFF 또는 오픈빌더가 callbackUrl 미제공) → 기존 동기 경로
+    if not settings.use_callback or not callback_url:
+        result = _process_utterance(parsed["text"], parsed["user_key"], session)
+        return ob.send_response(result)
+
+    user_key = parsed["user_key"]
+
+    # 이미 처리 중이면 무시 (선착순)
+    if not _acquire_inflight(user_key):
+        return ob.send_response({"response": BUSY_MESSAGE})
+
+    threading.Thread(
+        target=_callback_worker,
+        args=(parsed["text"], user_key, callback_url),
+        daemon=True,
+    ).start()
+
+    return {
+        "version": "2.0",
+        "useCallback": True,
+        "data": {"text": WAITING_MESSAGE},
+    }
 
 
 @router.post("/reservations")

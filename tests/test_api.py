@@ -11,7 +11,18 @@ def test_health():
     assert r.json()["status"] == "ok"
 
 
-def test_webhook():
+def test_webhook_first_asks_field_when_unspecified():
+    r = client.post(
+        "/chat/webhook",
+        json={"utterance": "안녕하세요", "user_key": "field-probe-1"},
+    )
+    assert r.status_code == 200
+    text = r.json()["response"]
+    # "안녕하세요" 한마디로 분야 미확인 상태 → 특정 분야를 가정하지 않아야 함
+    assert "격락손해" not in text
+    assert "수리" not in text
+    # 분야 확인 질문이 포함되어야 함
+    assert "어떤 일" in text or "상담" in text or "분야" in text
     r = client.post("/chat/webhook", json={"utterance": "이혼 문의", "user_key": "u1"})
     assert r.status_code == 200
     assert "response" in r.json()

@@ -26,4 +26,7 @@ def _force_mock_llm(monkeypatch):
     격리된 상태를 유지한다. (웹훅 테스트가 실제 API를 호출해 401이 나는 것 방지)
     """
     monkeypatch.setattr(settings, "llm_provider", "mock")
+    # 콜백 경로도 실제 추론 API를 호출하지 않도록 mock 체인 + mock 전송 강제
+    monkeypatch.setattr(settings, "reasoning_models", "mock:mock")
+    monkeypatch.setattr(settings, "callback_adapter", "mock")
     yield
