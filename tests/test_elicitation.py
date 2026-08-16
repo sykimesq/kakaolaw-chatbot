@@ -9,7 +9,9 @@ from app.services.llm_adapter import MockLLMAdapter
 
 def test_hard_rules_present():
     assert "상담 접수 상담사" in HARD_RULES
-    assert "답변을 주지 마라" in HARD_RULES
+    assert "법률 답변·자문·예측·판단·전망을 절대 제공하지 마라" in HARD_RULES
+    # 마감 시 변호사 상담 희망 여부를 묻는 규칙
+    assert "변호사님과 직접 상담을 원하시면" in HARD_RULES
 
 
 def test_detect_urgent():

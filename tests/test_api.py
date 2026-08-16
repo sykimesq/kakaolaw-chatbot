@@ -86,7 +86,7 @@ def test_conversation_history_persists():
 
 
 def test_conversation_continues_beyond_turn_limit():
-    """턴 한도(12) 이내에서는 대화가 계속된다 (사용자 마무리 전 강제 종료 없음).
+    """턴 한도(6) 이내에서는 대화가 계속된다 (사용자 마무리 전 강제 종료 없음).
 
     mock LLM은 항상 질문을 반환하므로, 턴 한도 이내에서는 '접수 완료'로 끊기지 않고
     계속 질문 응답이 나와야 한다. (사용자가 마무리 의사를 밝힐 때만 종료)
@@ -97,7 +97,7 @@ def test_conversation_continues_beyond_turn_limit():
     from app.models import ChatMessage
 
     user_key = "limit-user-001"
-    for i in range(10):  # 10턴 전송 (턴 한도 12 이내)
+    for i in range(5):  # 5턴 전송 (턴 한도 6 이내)
         r = client.post(
             "/chat/openbuilder",
             json={"userRequest": {"utterance": f"상담 {i}", "user": {"id": user_key}}},
@@ -108,19 +108,19 @@ def test_conversation_continues_beyond_turn_limit():
         # 턴 한도 이내에서는 계속 질문 응답 (접수 완료로 끊기지 않음)
         assert "접수했습니다" not in text
 
-    # DB에 메시지가 저장됐는지 확인 (user 10 + assistant 10 = 20)
+    # DB에 메시지가 저장됐는지 확인 (user 5 + assistant 5 = 10)
     with Session(engine) as s:
         msgs = s.exec(
             select(ChatMessage).where(ChatMessage.user_key == user_key)
         ).all()
-        assert len(msgs) == 20
+        assert len(msgs) == 10
 
 
 def test_turn_limit_completes_after_max():
-    """턴 한도(12)를 넘으면 LLM 호출 없이 즉시 '접수 완료'로 전환 (timeout 안전).
+    """턴 한도(6)를 넘으면 LLM 호출 없이 즉시 '접수 완료'로 전환.
 
-    대화가 길어져 히스토리가 커지면 LLM 생성이 5초를 넘길 수 있으므로,
-    턴 한도 초과 시 고정 응답을 즉시 반환한다.
+    대화가 끝없이 이어지지 않도록 한도 초과 시 고정 응답(변호사 상담 희망 여부
+    확인 멘트)을 즉시 반환한다.
     """
     from sqlmodel import Session, select
 
@@ -128,8 +128,8 @@ def test_turn_limit_completes_after_max():
     from app.models import ChatMessage
 
     user_key = "limit-user-002"
-    # 턴 한도(12) + 1 = 13턴 전송
-    for i in range(13):
+    # 턴 한도(6) + 1 = 7턴 전송
+    for i in range(7):
         r = client.post(
             "/chat/openbuilder",
             json={"userRequest": {"utterance": f"상담 {i}", "user": {"id": user_key}}},
@@ -137,24 +137,25 @@ def test_turn_limit_completes_after_max():
         assert r.status_code == 200
         body = r.json()
         text = body["template"]["outputs"][0]["simpleText"]["text"]
-        if i < 12:
+        if i < 6:
             # 한도 이내: 계속 질문 응답
             assert "접수했습니다" not in text
         else:
-            # 한도 초과(13번째): 즉시 접수 완료
+            # 한도 초과(7번째): 즉시 접수 완료 + 변호사 상담 희망 여부 확인
             assert "접수했습니다" in text
+            assert "변호사님과 직접 상담을 원하시면" in text
 
 
 def test_turn_reset_after_completion():
     """접수 완료 후 새 대화 시작 시 턴 카운트가 리셋된다.
 
-    과거에 12턴 이상 대화해 COMPLETE_MESSAGE로 종료된 user_key라도,
+    과거에 6턴 이상 대화해 COMPLETE_MESSAGE로 종료된 user_key라도,
     그 이후 새 메시지는 1턴부터 시작해야 한다. (테스트 누적분으로 인한
     첫 메시지 즉시 종료 버그 방지 — 세션 리셋 로직 검증)
     """
     user_key = "reset-user-001"
-    # 1) 13턴 보내서 강제 접수 완료 유도
-    for i in range(13):
+    # 1) 7턴 보내서 강제 접수 완료 유도
+    for i in range(7):
         r = client.post(
             "/chat/openbuilder",
             json={"userRequest": {"utterance": f"상담 {i}", "user": {"id": user_key}}},

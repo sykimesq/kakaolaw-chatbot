@@ -20,6 +20,7 @@ from app.services.kakao_adapter import (
     get_callback_adapter,
     get_openbuilder_adapter,
 )
+from app.services.legal_guard import sanitize
 from app.services.llm_provider import get_llm_adapter
 from app.services.reasoning import reason_next_question
 
@@ -37,16 +38,31 @@ _alimtalk = MockAlimtalkAdapter()
 MAX_HISTORY = 30
 
 # 되묻기 최대 턴 수 — 이 턴을 넘으면 LLM 호출 없이 즉시 "접수 완료"로 전환.
-# (대화가 길어지면 히스토리가 커져 LLM 생성 시간이 늘어 오픈빌더 스킬 timeout(5초) 위험이 커짐)
-# 사용자가 마무리 의사를 밝히면(LLM이 "접수했습니다" 반환) 그보다 먼저 종료된다.
-MAX_ELICIT_TURNS = 12
+# 콜백 도입으로 timeout 위험은 사라졌지만, 대화가 끝없이 이어지면 사용자가 지친다.
+# 변호사 상담 접수에 필요한 정보(분야·입장·경위·진행상황·원하는 것)는 5턴이면 충분하므로
+# 6턴으로 제한하고, 한도 도달 시 변호사 상담 희망 여부를 물으며 마감한다.
+MAX_ELICIT_TURNS = 6
 
 # 접수 완료 시 사용자에게 보낼 고정 응답 (LLM 호출 없음 → timeout 안전)
 # LLM이 조기에 "접수했습니다"를 반환하거나 턴 한도 도달 시 사용됨.
+# ⚠️ "접수했습니다"가 반드시 포함돼야 세션 리셋(_count_user_turns)이 동작한다.
 COMPLETE_MESSAGE = (
-    "지금까지 말씀해 주신 내용으로 상담을 접수했습니다. "
-    "변호사님께 전달드리고 검토 후 연락드릴게요. 감사합니다."
+    "말씀해 주신 내용은 잘 접수했습니다. "
+    "변호사님과 직접 상담을 원하시면 도와드릴까요? "
+    "원하시면 '상담 원해요'라고 말씀해 주세요."
 )
+
+# 사용자가 변호사 상담을 원한다고 밝혔을 때의 최종 응답
+CONSULT_ACCEPTED_MESSAGE = (
+    "네, 접수했습니다. 변호사님께 전달드리고 검토 후 연락드릴게요. 감사합니다."
+)
+
+# 상담 희망 의사로 판정할 키워드
+CONSULT_YES_KEYWORDS = [
+    "상담 원해", "상담원해", "상담 받고", "상담받고", "상담 부탁", "상담부탁",
+    "네", "예", "좋아요", "부탁드립니다", "부탁해요", "해주세요", "원합니다",
+    "연락주세요", "연락 주세요", "만나고", "예약",
+]
 
 # ── 콜백 모드 관련 ────────────────────────────────────────────
 # 5초 안에 반환하는 대기 메시지 (LLM 호출 없음 → timeout 안전)
@@ -143,6 +159,26 @@ def _count_user_turns(history: list[dict]) -> int:
     return count
 
 
+def _is_consult_accept(history: list[dict]) -> bool:
+    """직전 챗봇 응답이 '변호사 상담을 원하시나요?'였고, 사용자가 동의했는지 판정.
+
+    ⚠️ 마지막 항목이 방금 들어온 사용자 발화라고 가정한다(_process_utterance에서
+       history에 append한 뒤 호출).
+    직전 챗봇 질문 없이 단순히 "네"만 온 경우는 동의로 보지 않는다(오종료 방지).
+    """
+    if len(history) < 2:
+        return False
+    last = history[-1]
+    prev = history[-2]
+    if last.get("role") != "user" or prev.get("role") != "assistant":
+        return False
+    # 직전 응답이 상담 희망을 물은 마감 멘트인지 확인
+    if "상담을 원하시면" not in prev.get("content", ""):
+        return False
+    text = last.get("content", "").strip()
+    return any(kw in text for kw in CONSULT_YES_KEYWORDS)
+
+
 def _process_utterance(
     text: str,
     user_key: str,
@@ -171,6 +207,10 @@ def _process_utterance(
     if urgent:
         response = COMPLETE_MESSAGE
         inquiry_status = InquiryStatus.URGENT
+    # 직전에 변호사 상담 여부를 물었고 사용자가 동의했으면 즉시 종료 (LLM 호출 없음)
+    elif _is_consult_accept(history):
+        response = CONSULT_ACCEPTED_MESSAGE
+        inquiry_status = InquiryStatus.COMPLETED
     # 되묻기 턴 한도 도달 시 자동 접수 완료 (LLM 호출 없이 빠르게 응답 → timeout 안전)
     elif user_turns > MAX_ELICIT_TURNS:
         response = COMPLETE_MESSAGE
@@ -179,6 +219,8 @@ def _process_utterance(
         # 되묻기 질문 생성 (이전 대화 포함)
         # LLM이 사용자의 마무리 의사를 감지하면 "접수했습니다" 응답을 반환한다.
         response = question_fn(history) if question_fn else svc.next_question(history)
+        # ⚠️ 프롬프트만 믿지 않는다 — 법률 판단이 섞이면 안전 문구로 교체 (변호사법)
+        response = sanitize(response)
         # LLM이 마무리 신호를 감지해 "접수했습니다"를 반환하면 접수 완료로 처리
         if "접수했습니다" in response:
             inquiry_status = InquiryStatus.COMPLETED

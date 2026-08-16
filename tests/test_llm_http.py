@@ -40,7 +40,10 @@ def test_openrouter_next_question_calls_api():
         m for m in kwargs["json"]["messages"] if m["role"] == "system"
     ]
     assert any("상담 접수 상담사" in m["content"] for m in system_msgs)
-    assert any("법률 답변/자문/예측/판단을 제공하지 마라" in m["content"] for m in system_msgs)
+    assert any(
+        "법률 답변·자문·예측·판단·전망을 절대 제공하지 마라" in m["content"]
+        for m in system_msgs
+    )
 
 
 def test_openrouter_summarize_parses_json():
