@@ -1,3 +1,4 @@
+import logging
 import threading
 import time
 
@@ -23,6 +24,8 @@ from app.services.llm_provider import get_llm_adapter
 from app.services.reasoning import reason_next_question
 
 router = APIRouter(prefix="/chat", tags=["chat"])
+
+logger = logging.getLogger(__name__)
 
 # 실제 알림톡 키 확보 전까지 mock 사용
 _alimtalk = MockAlimtalkAdapter()
@@ -96,8 +99,10 @@ def _callback_worker(text: str, user_key: str, callback_url: str) -> None:
 
     try:
         get_callback_adapter(settings.callback_adapter).send(callback_url, answer)
-    except Exception:
-        pass
+        logger.info("콜백 전송 성공 user=%s len=%d", user_key, len(answer))
+    except Exception as exc:
+        # ⚠️ callbackUrl은 5분/1회 한정이므로 재시도 불가 — 실패는 반드시 로그로 남긴다.
+        logger.error("콜백 전송 실패 user=%s: %s", user_key, exc)
     finally:
         _release_inflight(user_key)
 

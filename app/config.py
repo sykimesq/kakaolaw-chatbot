@@ -27,8 +27,9 @@ class Settings(BaseSettings):
         "nous:tencent/hy3:free,"
         "openrouter:nvidia/nemotron-3-ultra-550b-a55b:free"
     )
-    # 체인 내 각 모델 호출 타임아웃(초) — 콜백 1분 한도 안에서 3회 시도 가능하게
-    reasoning_timeout: float = 25.0
+    # 체인 내 각 모델 호출 타임아웃(초)
+    # 오픈빌더 callbackUrl은 5분/1회 유효 → 40초×3회=120초로 여유 있게 잡아도 안전.
+    reasoning_timeout: float = 40.0
     nous_base_url: str = "https://inference-api.nousresearch.com/v1"
     nous_portal_api_key: str = ""  # .env에서 주입
 
