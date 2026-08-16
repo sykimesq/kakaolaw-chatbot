@@ -1,3 +1,4 @@
+import logging
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -8,6 +9,15 @@ from fastapi.staticfiles import StaticFiles
 from app.config import settings
 from app.database import init_db
 from app.routers import admin, chat
+
+# ⚠️ uvicorn 기본 설정은 앱 로거(app.*)에 핸들러를 붙이지 않아 logger.info/error가
+#    컨테이너 로그에 전혀 나오지 않는다. 콜백은 5분/1회로 재시도가 불가하므로
+#    전송 성공/실패를 반드시 볼 수 있어야 한다 → 앱 로거를 명시적으로 설정한다.
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+)
+logging.getLogger("app").setLevel(logging.INFO)
 
 
 @asynccontextmanager
