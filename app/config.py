@@ -39,6 +39,29 @@ class Settings(BaseSettings):
     # 콜백 전송 어댑터: "real"(실제 POST) | "mock"(테스트)
     callback_adapter: str = "real"
 
+    # ── 변호사 알림(상담 접수 전달) 설정 ──────────────
+    # 접수 완료 시 변호사에게 알리는 채널.
+    # alimtalk: 카카오 비즈니스 알림톡 비즈메시지 발송(발신프로필/토큰 필요)
+    #          → 없으면 자동으로 mock(로그만)으로 폴백해 운영 중단 없이 동작.
+    # admin_page: /admin 페이지에 접수 내역+대화전문 노출(무비용, 기본 ON).
+    lawyer_notify_channels: str = "admin_page,alimtalk,slack"
+    # 알림톡 수신자(변호사) 전화번호 — 국내 형식 01012345678
+    lawyer_phone: str = ""
+    # Slack Incoming Webhook URL — 비어있으면 mock(로그만) 폴백
+    slack_webhook_url: str = ""
+    # 관리자 페이지 공개 URL — Slack 알림에서 클릭 가능한 링크로 표시
+    admin_url: str = "https://kakaolaw.lawcalhost.com/admin"
+    # ── 관리자 페이지 인증 (HTTP Basic Auth) ──────────────
+    # 둘 다 비어있으면 인증 비활성화(기본값). 배포 시 .env에 채우면
+    # /admin 페이지와 /admin/* API가 Basic Auth로 보호된다.
+    admin_username: str = ""
+    admin_password: str = ""
+    # 카카오 비즈니스 API
+    kakao_biz_api_base: str = "https://api.bizmessage.kakao.com/v2"
+    kakao_biz_token: str = ""  # 비즈메시지 토큰(.env 주입). 비어있으면 mock 폴백.
+    # 알림톡 발신 프로필(카카오 비즈니스 관리자 '발신프로필 번호')
+    kakao_sender_key: str = ""
+
     model_config = {"env_file": ".env", "env_prefix": ""}
 
 

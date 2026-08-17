@@ -30,11 +30,13 @@ class Inquiry(SQLModel, table=True):
     """법률 상담 질의 (되묻기 수집 후 요약 전달)."""
 
     id: Optional[int] = Field(default=None, primary_key=True)
-    phone: str  # 문의자 연락처
+    phone: str = ""  # 문의자 연락처 (카카오 발화 기반이라 비어있을 수 있음)
+    user_key: str = ""  # 카카오 사용자 식별자 (재방문 추적용)
     name: str = ""  # 문의자 이름
     field: Optional[CaseField] = None  # 상담 분야
     position: str = ""  # 문의자 입장 (당사자/가족 등)
-    summary: str = ""  # 질의 요약
+    summary: str = ""  # 질의 요약 (LLM 생성)
+    transcript: str = ""  # 전체 대화 전문 (user/assistant 교차)
     status: InquiryStatus = InquiryStatus.COLLECTING
     urgent: bool = False
     created_at: datetime = Field(default_factory=datetime.utcnow)

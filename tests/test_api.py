@@ -1,6 +1,7 @@
 from fastapi.testclient import TestClient
 
 from app.main import app
+from app.routers import chat as chat_router
 
 client = TestClient(app)
 
@@ -9,6 +10,130 @@ def test_health():
     r = client.get("/health")
     assert r.status_code == 200
     assert r.json()["status"] == "ok"
+
+
+def test_reset_command_clears_user_data():
+    """채팅창에서 '/reset' 입력 시 해당 사용자의 대화·접수가 삭제된다."""
+    from sqlmodel import Session, select
+
+    from app.database import engine
+    from app.models import ChatMessage, Inquiry
+
+    user_key = "reset-cmd-001"
+    # 먼저 대화 몇 턴 생성
+    for i in range(3):
+        r = client.post(
+            "/chat/webhook",
+            json={"utterance": f"테스트 {i}", "user_key": user_key},
+        )
+        assert r.status_code == 200
+
+    # 대화가 저장됐는지 확인
+    with Session(engine) as s:
+        msgs = s.exec(select(ChatMessage).where(ChatMessage.user_key == user_key)).all()
+        assert len(msgs) == 6  # user 3 + assistant 3
+
+    # /reset 명령 → 즉시 리셋 응답, 저장 로직 없이 반환
+    r = client.post("/chat/webhook", json={"utterance": "/reset", "user_key": user_key})
+    assert r.status_code == 200
+    body = r.json()
+    assert body["reset"] is True
+    assert "초기화" in body["response"]
+
+    # 대화·접수가 모두 삭제됐는지 확인
+    with Session(engine) as s:
+        msgs = s.exec(select(ChatMessage).where(ChatMessage.user_key == user_key)).all()
+        assert len(msgs) == 0
+        inqs = s.exec(select(Inquiry).where(Inquiry.user_key == user_key)).all()
+        assert len(inqs) == 0
+
+    # 리셋 후 새 대화는 '새 상담'으로 시작 (이전 컨텍스트 없음)
+    r2 = client.post("/chat/webhook", json={"utterance": "새 상담", "user_key": user_key})
+    assert r2.status_code == 200
+    with Session(engine) as s:
+        msgs = s.exec(select(ChatMessage).where(ChatMessage.user_key == user_key)).all()
+        assert len(msgs) == 2  # user 1 + assistant 1 (리셋 직후 1턴만)
+
+
+def test_phone_collection_flow(monkeypatch):
+    """상담 동의 후 연락처를 물어보고, 받으면 DB에 저장한다."""
+    from sqlmodel import Session, select
+
+    from app.database import engine
+    from app.models import Inquiry
+
+    user_key = "phone-flow-1"
+
+    def _done(history):
+        user_msgs = [m for m in history if m["role"] == "user"]
+        if len(user_msgs) < 2:
+            return "추가 질문입니다"
+        return "말씀해 주신 내용은 잘 접수했습니다. 변호사님과 직접 상담을 원하시면 도와드릴까요?"
+
+    monkeypatch.setattr(
+        chat_router, "get_llm_adapter",
+        lambda: type("T", (), {"next_question": lambda self, h: _done(h),
+                               "summarize": lambda self, h: {}})(),
+    )
+
+    # 2턴째에 LLM이 마감 멘트(COMPLETE_MESSAGE) 반환
+    r = client.post("/chat/webhook", json={"utterance": "첫", "user_key": user_key})
+    assert "접수했습니다" not in r.json()["response"]
+    r = client.post("/chat/webhook", json={"utterance": "둘", "user_key": user_key})
+    assert "접수했습니다" in r.json()["response"]
+
+    # 상담 동의 → 연락처 요청
+    r2 = client.post("/chat/webhook", json={"utterance": "상담 원해요", "user_key": user_key})
+    assert r2.json()["response"] == chat_router.ASK_PHONE_MESSAGE
+
+    # 연락처 입력 → 최종 접수 완료 + DB에 저장
+    r3 = client.post("/chat/webhook", json={"utterance": "010-1234-5678", "user_key": user_key})
+    assert r3.json()["response"] == chat_router.CONSULT_ACCEPTED_MESSAGE
+
+    with Session(engine) as s:
+        inq = s.exec(select(Inquiry).where(Inquiry.user_key == user_key)).first()
+        assert inq, "Inquiry가 저장되지 않음"
+        assert inq.phone == "01012345678"  # 정규화된 전화번호
+
+
+def test_phone_skip_flow(monkeypatch):
+    """연락처를 거절하면 연락처 없이 마무리된다."""
+    from sqlmodel import Session, select
+
+    from app.database import engine
+    from app.models import Inquiry
+
+    user_key = "phone-skip-1"
+
+    def _done(history):
+        user_msgs = [m for m in history if m["role"] == "user"]
+        if len(user_msgs) < 2:
+            return "추가 질문입니다"
+        return "말씀해 주신 내용은 잘 접수했습니다. 변호사님과 직접 상담을 원하시면 도와드릴까요?"
+
+    monkeypatch.setattr(
+        chat_router, "get_llm_adapter",
+        lambda: type("T", (), {"next_question": lambda self, h: _done(h),
+                               "summarize": lambda self, h: {}})(),
+    )
+
+    r = client.post("/chat/webhook", json={"utterance": "첫", "user_key": user_key})
+    r = client.post("/chat/webhook", json={"utterance": "둘", "user_key": user_key})
+    assert "접수했습니다" in r.json()["response"]
+
+    # 상담 동의 → 연락처 요청
+    r2 = client.post("/chat/webhook", json={"utterance": "상담 원해요", "user_key": user_key})
+    assert r2.json()["response"] == chat_router.ASK_PHONE_MESSAGE
+
+    # 연락처 거절
+    r3 = client.post("/chat/webhook", json={"utterance": "없어요", "user_key": user_key})
+    assert r3.json()["response"] == chat_router.PHONE_SKIPPED_MESSAGE
+
+    with Session(engine) as s:
+        inq = s.exec(select(Inquiry).where(Inquiry.user_key == user_key)).first()
+        assert inq, "Inquiry가 저장되지 않음"
+        # 연락처를 안 줬으므로 phone은 user_key 그대로
+        assert inq.phone == user_key
 
 
 def test_webhook_first_asks_field_when_unspecified():
@@ -85,11 +210,11 @@ def test_conversation_history_persists():
         assert msgs[0].content == "메시지 0"
 
 
-def test_conversation_continues_beyond_turn_limit():
-    """턴 한도(6) 이내에서는 대화가 계속된다 (사용자 마무리 전 강제 종료 없음).
+def test_conversation_continues_without_turn_limit():
+    """턴 한도가 없어도 LLM이 계속 질문하면 대화가 무한정 이어진다.
 
-    mock LLM은 항상 질문을 반환하므로, 턴 한도 이내에서는 '접수 완료'로 끊기지 않고
-    계속 질문 응답이 나와야 한다. (사용자가 마무리 의사를 밝힐 때만 종료)
+    요건사실 수집이 완료될 때까지 질문하므로, LLM이 '접수했습니다'를 반환하기
+    전에는 턴 수와 무관하게 대화가 계속된다. (강제 종료 없음)
     """
     from sqlmodel import Session, select
 
@@ -97,7 +222,7 @@ def test_conversation_continues_beyond_turn_limit():
     from app.models import ChatMessage
 
     user_key = "limit-user-001"
-    for i in range(5):  # 5턴 전송 (턴 한도 6 이내)
+    for i in range(10):  # 이전 턴 한도(6)를 넘는 10턴
         r = client.post(
             "/chat/openbuilder",
             json={"userRequest": {"utterance": f"상담 {i}", "user": {"id": user_key}}},
@@ -105,75 +230,101 @@ def test_conversation_continues_beyond_turn_limit():
         assert r.status_code == 200
         body = r.json()
         text = body["template"]["outputs"][0]["simpleText"]["text"]
-        # 턴 한도 이내에서는 계속 질문 응답 (접수 완료로 끊기지 않음)
+        # 턴 수와 무관하게 계속 질문 응답 (접수 완료로 끊기지 않음)
         assert "접수했습니다" not in text
 
-    # DB에 메시지가 저장됐는지 확인 (user 5 + assistant 5 = 10)
+    # DB에 메시지가 저장됐는지 확인 (user 10 + assistant 10 = 20)
     with Session(engine) as s:
         msgs = s.exec(
             select(ChatMessage).where(ChatMessage.user_key == user_key)
         ).all()
-        assert len(msgs) == 10
+        assert len(msgs) == 20
 
 
-def test_turn_limit_completes_after_max():
-    """턴 한도(6)를 넘으면 LLM 호출 없이 즉시 '접수 완료'로 전환.
+def test_completion_when_llm_returns_접수했습니다(monkeypatch):
+    """LLM이 요건사실 수집 완료로 '접수했습니다'를 반환하면 즉시 종료된다.
 
-    대화가 끝없이 이어지지 않도록 한도 초과 시 고정 응답(변호사 상담 희망 여부
-    확인 멘트)을 즉시 반환한다.
+    턴 한도가 사라진 뒤의 유일한 종료 경로 중 하나. (LLM 마무리 감지)
     """
     from sqlmodel import Session, select
 
     from app.database import engine
     from app.models import ChatMessage
 
-    user_key = "limit-user-002"
-    # 턴 한도(6) + 1 = 7턴 전송
-    for i in range(7):
-        r = client.post(
-            "/chat/openbuilder",
-            json={"userRequest": {"utterance": f"상담 {i}", "user": {"id": user_key}}},
-        )
-        assert r.status_code == 200
-        body = r.json()
-        text = body["template"]["outputs"][0]["simpleText"]["text"]
-        if i < 6:
-            # 한도 이내: 계속 질문 응답
-            assert "접수했습니다" not in text
-        else:
-            # 한도 초과(7번째): 즉시 접수 완료 + 변호사 상담 희망 여부 확인
-            assert "접수했습니다" in text
-            assert "변호사님과 직접 상담을 원하시면" in text
+    user_key = "llm-done-001"
 
+    def _done(history):
+        # 질문을 몇 번 하다가 수집 완료 신호를 반환
+        user_msgs = [m for m in history if m["role"] == "user"]
+        if len(user_msgs) < 2:
+            return "추가 질문입니다"
+        return "말씀해 주신 내용은 잘 접수했습니다. 변호사님과 직접 상담을 원하시면 도와드릴까요?"
 
-def test_turn_reset_after_completion():
-    """접수 완료 후 새 대화 시작 시 턴 카운트가 리셋된다.
-
-    과거에 6턴 이상 대화해 COMPLETE_MESSAGE로 종료된 user_key라도,
-    그 이후 새 메시지는 1턴부터 시작해야 한다. (테스트 누적분으로 인한
-    첫 메시지 즉시 종료 버그 방지 — 세션 리셋 로직 검증)
-    """
-    user_key = "reset-user-001"
-    # 1) 7턴 보내서 강제 접수 완료 유도
-    for i in range(7):
-        r = client.post(
-            "/chat/openbuilder",
-            json={"userRequest": {"utterance": f"상담 {i}", "user": {"id": user_key}}},
-        )
-        assert r.status_code == 200
-    # 마지막 응답이 접수 완료인지 확인
-    text = r.json()["template"]["outputs"][0]["simpleText"]["text"]
-    assert "접수했습니다" in text
-
-    # 2) 접수 완료 이후 새 메시지 — 턴 카운트 리셋되어 즉시 종료되지 않아야 함
-    r2 = client.post(
-        "/chat/openbuilder",
-        json={"userRequest": {"utterance": "새로운 상담입니다", "user": {"id": user_key}}},
+    monkeypatch.setattr(
+        chat_router, "get_llm_adapter",
+        lambda: type("T", (), {"next_question": lambda self, h: _done(h),
+                               "summarize": lambda self, h: {}})(),
     )
-    assert r2.status_code == 200
-    text2 = r2.json()["template"]["outputs"][0]["simpleText"]["text"]
-    # 새 세션 1턴째이므로 질문 응답 (접수 완료로 끊기지 않음)
-    assert "접수했습니다" not in text2
+
+    # 2턴째부터 접수 완료
+    r = client.post("/chat/webhook", json={"utterance": "첫 질문", "user_key": user_key})
+    assert "접수했습니다" not in r.json()["response"]
+    r2 = client.post("/chat/webhook", json={"utterance": "두번째", "user_key": user_key})
+    assert "접수했습니다" in r2.json()["response"]
+
+    with Session(engine) as s:
+        msgs = s.exec(
+            select(ChatMessage).where(ChatMessage.user_key == user_key)
+        ).all()
+        assert len(msgs) == 4  # user 2 + assistant 2
+
+
+def test_turn_reset_after_completion(monkeypatch):
+    """접수 완료 후 새 대화 시작 시 새 세션으로 동작한다.
+
+    LLM이 '접수했습니다'로 마감한 뒤, 다음 메시지는 새 상담으로 처리돼
+    즉시 종료되지 않는다. (과거 턴 카운트 누적 문제 제거 후 검증)
+    """
+    from sqlmodel import Session, select
+
+    from app.database import engine
+    from app.models import Inquiry, InquiryStatus
+
+    user_key = "reset-user-001"
+
+    def _done(history):
+        # 마지막 "접수했습니다" 이후의 user 메시지만 센다 (새 세션 재개)
+        count = 0
+        for m in reversed(history):
+            if m["role"] == "assistant" and "접수했습니다" in m["content"]:
+                break
+            if m["role"] == "user":
+                count += 1
+        if count < 2:
+            return "추가 질문입니다"
+        return "말씀해 주신 내용은 잘 접수했습니다. 변호사님과 직접 상담을 원하시면 도와드릴까요?"
+
+    monkeypatch.setattr(
+        chat_router, "get_llm_adapter",
+        lambda: type("T", (), {"next_question": lambda self, h: _done(h),
+                               "summarize": lambda self, h: {}})(),
+    )
+
+    # 2턴째에 접수 완료
+    r = client.post("/chat/webhook", json={"utterance": "첫", "user_key": user_key})
+    assert "접수했습니다" not in r.json()["response"]
+    r = client.post("/chat/webhook", json={"utterance": "둘", "user_key": user_key})
+    assert "접수했습니다" in r.json()["response"]
+
+    # Inquiry가 완료 상태로 저장됐는지 확인
+    with Session(engine) as s:
+        inq = s.exec(select(Inquiry).where(Inquiry.user_key == user_key)).first()
+        assert inq and inq.status == InquiryStatus.COMPLETED
+
+    # 접수 완료 이후 새 메시지 — 새 세션 1턴째이므로 질문 응답
+    r2 = client.post("/chat/webhook", json={"utterance": "새로운 상담입니다", "user_key": user_key})
+    text = r2.json()["response"]
+    assert "접수했습니다" not in text
 
 
 def test_create_reservation():

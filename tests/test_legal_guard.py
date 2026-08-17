@@ -100,7 +100,11 @@ def test_consult_accept_completes_immediately(monkeypatch):
 
     def _tracked(history):
         calls.append(1)
-        return "추가 질문입니다"
+        # 첫 턴은 질문, 이후 LLM 마무리 감지로 "접수했습니다" 마감 멘트 반환
+        user_msgs = [m for m in history if m["role"] == "user"]
+        if len(user_msgs) < 2:
+            return "추가 질문입니다"
+        return "말씀해 주신 내용은 잘 접수했습니다. 변호사님과 직접 상담을 원하시면 도와드릴까요?"
 
     monkeypatch.setattr(
         chat_router,
@@ -111,8 +115,8 @@ def test_consult_accept_completes_immediately(monkeypatch):
         )(),
     )
     user_key = "consult-accept-1"
-    # 턴 한도(6)를 넘겨 마감 멘트를 유도
-    for i in range(7):
+    # 두 번째 턴에서 LLM이 마감 멘트를 반환하도록 유도
+    for i in range(2):
         r = client.post(
             "/chat/webhook",
             json={"utterance": f"상담 {i}", "user_key": user_key},
@@ -124,9 +128,16 @@ def test_consult_accept_completes_immediately(monkeypatch):
         "/chat/webhook", json={"utterance": "상담 원해요", "user_key": user_key}
     )
     text = r2.json()["response"]
-    assert text == chat_router.CONSULT_ACCEPTED_MESSAGE
+    # 상담 동의 → 연락처 요청 (LLM 호출 없이 즉시)
+    assert text == chat_router.ASK_PHONE_MESSAGE
     # LLM을 추가로 호출하지 않았는지 확인
     assert len(calls) == before
+
+    # 연락처를 주면 최종 접수 완료
+    r3 = client.post(
+        "/chat/webhook", json={"utterance": "010-1234-5678", "user_key": user_key}
+    )
+    assert r3.json()["response"] == chat_router.CONSULT_ACCEPTED_MESSAGE
 
 
 def test_bare_yes_without_offer_is_not_completion():

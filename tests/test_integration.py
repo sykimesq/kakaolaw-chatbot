@@ -45,4 +45,4 @@ def test_full_flow():
 def test_admin_page_loads():
     r = client.get("/admin")
     assert r.status_code == 200
-    assert "법률사무소 관리자" in r.text
+    assert "법률 상담 접수 관리" in r.text

@@ -2,13 +2,14 @@ import logging
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import FastAPI
+from fastapi import Depends, FastAPI
 from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 
 from app.config import settings
 from app.database import init_db
 from app.routers import admin, chat
+from app.routers.admin import require_admin
 
 # ⚠️ uvicorn 기본 설정은 앱 로거(app.*)에 핸들러를 붙이지 않아 logger.info/error가
 #    컨테이너 로그에 전혀 나오지 않는다. 콜백은 5분/1회로 재시도가 불가하므로
@@ -35,7 +36,7 @@ STATIC_DIR = Path(__file__).parent / "static"
 
 
 @app.get("/admin", response_class=HTMLResponse)
-def admin_page() -> str:
+def admin_page(_: None = Depends(require_admin)) -> str:
     return (STATIC_DIR / "admin.html").read_text(encoding="utf-8")
 
 

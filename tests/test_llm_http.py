@@ -47,7 +47,7 @@ def test_openrouter_next_question_calls_api():
 
 
 def test_openrouter_summarize_parses_json():
-    """summarize가 JSON 응답을 파싱해 구조화된 요약을 반환."""
+    """summarize가 JSON 응답을 파싱해 구조화된 요약을 반환 (요건사실론 스키마)."""
     adapter = OpenRouterLLMAdapter(api_key="test-key")
 
     fake_response = mock.MagicMock()
@@ -56,7 +56,9 @@ def test_openrouter_summarize_parses_json():
             {
                 "message": {
                     "content": (
-                        '```json\n{"summary": "배우자 부정으로 이혼 고려",'
+                        '```json\n{"intent": "이혼을 원함",'
+                        ' "claim_facts": "배우자 부정으로 혼인관계 파탄",'
+                        ' "defense_facts": null, "evidence": null, "missing": null,'
                         ' "field": "가정", "position": "당사자",'
                         ' "urgent": false}\n```'
                     )
@@ -72,6 +74,7 @@ def test_openrouter_summarize_parses_json():
             [{"role": "user", "content": "이혼 문의"}]
         )
 
-    assert result["summary"] == "배우자 부정으로 이혼 고려"
+    assert result["intent"] == "이혼을 원함"
+    assert result["claim_facts"] == "배우자 부정으로 혼인관계 파탄"
     assert result["field"] == "가정"
     assert result["urgent"] is False

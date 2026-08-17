@@ -28,6 +28,19 @@ services:
       - NOUS_PORTAL_API_KEY=${NOUS_PORTAL_API_KEY}
       - NOUS_BASE_URL=${NOUS_BASE_URL}
       - CALLBACK_ADAPTER=${CALLBACK_ADAPTER}
+      # ── 관리자 페이지 인증 (HTTP Basic Auth) ──
+      # 둘 다 채워야 활성화. 비어있으면 인증 없이 동작.
+      - ADMIN_USERNAME=${ADMIN_USERNAME}
+      - ADMIN_PASSWORD=${ADMIN_PASSWORD}
+      # ── 변호사 접수 알림 채널 (notify.py) ──
+      # Slack webhook으로 상담 접수 알림 수신 (선택 채널). 비어있으면 mock 폴백.
+      - SLACK_WEBHOOK_URL=${SLACK_WEBHOOK_URL}
+      # 활성화할 알림 채널 목록 (admin_page 기본 ON, 여기서 slack 활성화)
+      - LAWYER_NOTIFY_CHANNELS=${LAWYER_NOTIFY_CHANNELS}
+      # 알림톡/카카오 비즈메시지 (필요 시 채워서 사용)
+      - LAWYER_PHONE=${LAWYER_PHONE}
+      - KAKAO_BIZ_TOKEN=${KAKAO_BIZ_TOKEN}
+      - KAKAO_SENDER_KEY=${KAKAO_SENDER_KEY}
       - DATABASE_URL=sqlite:////app/data/kakaolaw.db
     volumes:
       # SQLite DB 영속화 — 컨테이너 재생성에도 데이터 유지
